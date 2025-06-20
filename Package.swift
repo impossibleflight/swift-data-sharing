@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwiftDataSharing",
+    name: "swift-data-sharing",
     platforms: [
         .iOS(.v18),
         .watchOS(.v11)
