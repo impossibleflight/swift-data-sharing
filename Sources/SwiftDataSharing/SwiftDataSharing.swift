@@ -41,8 +41,8 @@ public extension SharedReaderKey {
     }
 
     static func fetchFirst<Model>(
-        predicate: Predicate<Model>?,
-        sortBy: [SortDescriptor<Model>]
+        predicate: Predicate<Model>? = nil,
+        sortBy: [SortDescriptor<Model>] = []
     ) -> Self where Self == FetchFirstKey<Model>, Model: PersistentModel {
         let descriptor = FetchDescriptor(predicate: predicate, sortBy: sortBy)
         return FetchFirstKey(fetchDescriptor: descriptor)
@@ -55,8 +55,8 @@ public extension SharedReaderKey {
     }
 
     static func fetchAll<Model>(
-        predicate: Predicate<Model>?,
-        sortBy: [SortDescriptor<Model>]
+        predicate: Predicate<Model>? = nil,
+        sortBy: [SortDescriptor<Model>] = []
     ) -> Self where Self == FetchAllKey<Model>.Default, Model: PersistentModel {
         let descriptor = FetchDescriptor(predicate: predicate, sortBy: sortBy)
         return Self[FetchAllKey(fetchDescriptor: descriptor), default: []]
@@ -69,8 +69,8 @@ public extension SharedReaderKey {
     }
 
     static func fetchedResults<Model>(
-        predicate: Predicate<Model>?,
-        sortBy: [SortDescriptor<Model>]
+        predicate: Predicate<Model>? = nil,
+        sortBy: [SortDescriptor<Model>] = []
     ) -> Self where Self == FetchedResultsKey<Model>, Model: PersistentModel {
         let descriptor = FetchDescriptor(predicate: predicate, sortBy: sortBy)
         return FetchedResultsKey(fetchDescriptor: descriptor)
@@ -124,13 +124,11 @@ public struct FetchFirstKey<Model: PersistentModel>: SharedReaderKey {
                 subscriber.yield(try modelContainer.mainContext.fetch(fetchDescriptor).first)
 
                 // Listen for changes
-                let fetchedResult = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
-                    .map { @MainActor _ in
-                        try modelContainer.mainContext.fetch(fetchDescriptor).first
-                    }
+                let changeNotifications = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
 
-                for try await result in fetchedResult {
+                for try await _ in changeNotifications {
                     guard !Task.isCancelled else { break }
+                    let result = try modelContainer.mainContext.fetch(fetchDescriptor).first
                     logger.debug("FetchFirstKey.fetchedResults: \(String(describing: result?.persistentModelID))")
                     subscriber.yield(result)
                 }
@@ -189,13 +187,11 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
             subscriber.yield(initialResults)
 
             // Listen for changes
-            let fetchedResults = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
-                .map { @MainActor _ in
-                    try modelContainer.mainContext.fetch(fetchDescriptor)
-                }
+            let changeNotifications = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
 
-            for try await results in fetchedResults {
+            for try await _ in changeNotifications {
                 guard !Task.isCancelled else { break }
+                let results = try modelContainer.mainContext.fetch(fetchDescriptor)
                 logger.debug("FetchAllKey.fetchedResults: \(results.map { $0.persistentModelID })")
                 subscriber.yield(results)
             }
@@ -251,13 +247,11 @@ public struct FetchedResultsKey<Model: PersistentModel>: SharedReaderKey {
             subscriber.yield(try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize))
 
             // Listen for changes
-            let fetchedResults = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
-            .map { @MainActor _ in
-                try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
-            }
+            let changeNotifications = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
 
-            for try await results in fetchedResults {
+            for try await _ in changeNotifications {
                 guard !Task.isCancelled else { break }
+                let results = try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
                 subscriber.yield(results)
             }
         }
