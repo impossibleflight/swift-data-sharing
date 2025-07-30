@@ -1,13 +1,36 @@
-import Sharing
 import CoreData
 import Dependencies
+import Foundation
 import OSLog
+import Sharing
 import SwiftData
 
 let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "",
     category: "SwiftDataSharing"
 )
+
+func debug(_ operation: () -> Void) {
+    if
+        let isEnabledArgument = ProcessInfo.processInfo.environment["com.impossibleflight.SwiftDataSharing.debug"],
+        let isEnabled = Bool(isEnabledArgument)
+    {
+        if isEnabled {
+            operation()
+        }
+    }
+}
+
+func trace(_ operation: () -> Void) {
+    if
+        let isEnabledArgument = ProcessInfo.processInfo.environment["com.impossibleflight.SwiftDataSharing.trace"],
+        let isEnabled = Bool(isEnabledArgument)
+    {
+        if isEnabled {
+            operation()
+        }
+    }
+}
 
 @Model final class Empty {
     init() {}
@@ -101,11 +124,11 @@ public struct FetchFirstKey<Model: PersistentModel>: SharedReaderKey {
         context: LoadContext<FetchResult>,
         continuation: LoadContinuation<FetchResult>
     ) {
-        logger.debug(#function)
+        debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         Task { @MainActor in
             do {
                 let result = try modelContainer.mainContext.fetch(fetchDescriptor).first
-                logger.debug("FetchFirstKey.result: \(String(describing: result?.persistentModelID))")
+                trace { logger.trace("FetchFirstKey.result: \(String(describing: result?.persistentModelID))") }
                 continuation.resume(returning: result)
             } catch {
                 logger.error("\(error)")
@@ -117,7 +140,7 @@ public struct FetchFirstKey<Model: PersistentModel>: SharedReaderKey {
         context: LoadContext<FetchResult>,
         subscriber: SharedSubscriber<FetchResult>
     ) -> SharedSubscription {
-        logger.debug(#function)
+        debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         let task = Task { @MainActor in
             // Send initial value
             do {
@@ -128,8 +151,9 @@ public struct FetchFirstKey<Model: PersistentModel>: SharedReaderKey {
 
                 for try await _ in changeNotifications {
                     guard !Task.isCancelled else { break }
+                    debug { logger.debug("FetchFirst(\(id)).NSPersistentStoreRemoteChange")}
                     let result = try modelContainer.mainContext.fetch(fetchDescriptor).first
-                    logger.debug("FetchFirstKey.fetchedResults: \(String(describing: result?.persistentModelID))")
+                    trace { logger.trace("FetchFirstKey\(id)).fetchedResults: \(String(describing: result?.persistentModelID))") }
                     subscriber.yield(result)
                 }
             } catch {
@@ -165,11 +189,12 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
         context: LoadContext<FetchResult>,
         continuation: LoadContinuation<FetchResult>
     ) {
+        debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         Task { @MainActor in
             do {
-                let result = try modelContainer.mainContext.fetch(fetchDescriptor)
-                logger.debug("FetchAllKey.result: \(result.map { $0.persistentModelID })")
-                continuation.resume(returning: result)
+                let results = try modelContainer.mainContext.fetch(fetchDescriptor)
+                trace { logger.trace("FetchAllKey\(id)).result[id]: \(results.map { $0.persistentModelID })") }
+                continuation.resume(returning: results)
             } catch {
                 logger.error("\(error)")
             }
@@ -180,10 +205,11 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
         context: LoadContext<FetchResult>,
         subscriber: SharedSubscriber<FetchResult>
     ) -> SharedSubscription {
+        debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         let task = Task { @MainActor in
             // Send initial results
             let initialResults = try modelContainer.mainContext.fetch(fetchDescriptor)
-            logger.debug("FetchAllKey.initialResults: \(initialResults.map { $0.persistentModelID })")
+            trace { logger.trace("FetchAllKey\(id)).initialResults: \(initialResults.map { $0.persistentModelID })") }
             subscriber.yield(initialResults)
 
             // Listen for changes
@@ -191,8 +217,9 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
 
             for try await _ in changeNotifications {
                 guard !Task.isCancelled else { break }
+                debug { logger.debug("FetchAllKey\(id)).NSPersistentStoreRemoteChange")}
                 let results = try modelContainer.mainContext.fetch(fetchDescriptor)
-                logger.debug("FetchAllKey.fetchedResults: \(results.map { $0.persistentModelID })")
+                trace { logger.trace("FetchAllKey\(id)).fetchedResults[id]: \(results.map { $0.persistentModelID })") }
                 subscriber.yield(results)
             }
         }
@@ -230,6 +257,7 @@ public struct FetchedResultsKey<Model: PersistentModel>: SharedReaderKey {
         context: LoadContext<FetchResult>,
         continuation: LoadContinuation<FetchResult>
     ) {
+        debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         Task { @MainActor in
             let result = Result<FetchResult?, Error> {
                 try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
@@ -242,6 +270,7 @@ public struct FetchedResultsKey<Model: PersistentModel>: SharedReaderKey {
         context: LoadContext<FetchResult>,
         subscriber: SharedSubscriber<FetchResult>
     ) -> SharedSubscription {
+        debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         let task = Task { @MainActor in
             // Send initial results
             subscriber.yield(try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize))
