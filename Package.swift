@@ -7,6 +7,7 @@ let package = Package(
     name: "swift-data-sharing",
     platforms: [
         .iOS(.v18),
+        .macOS(.v15),
         .watchOS(.v11)
     ],
     products: [
