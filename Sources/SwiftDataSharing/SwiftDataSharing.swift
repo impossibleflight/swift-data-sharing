@@ -47,6 +47,10 @@ enum DefaultModelContainerKey: DependencyKey {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         return try! ModelContainer(for: Empty.self, configurations: configuration)
     }
+
+    static var testValue: ModelContainer {
+        liveValue
+    }
 }
 
 public extension DependencyValues {
@@ -56,19 +60,20 @@ public extension DependencyValues {
     }
 }
 
+@MainActor
 public extension SharedReaderKey {
     static func fetchFirst<Model>(
         _ fetchDescriptor: FetchDescriptor<Model>
-    ) -> Self where Self == FetchFirstKey<Model>, Model: PersistentModel {
-        FetchFirstKey(fetchDescriptor: fetchDescriptor)
+    ) -> Self where Self == FetchFirstKey<Model>.Default, Model: PersistentModel {
+        Self[FetchFirstKey(fetchDescriptor: fetchDescriptor), default: nil]
     }
 
     static func fetchFirst<Model>(
         predicate: Predicate<Model>? = nil,
         sortBy: [SortDescriptor<Model>] = []
-    ) -> Self where Self == FetchFirstKey<Model>, Model: PersistentModel {
+    ) -> Self where Self == FetchFirstKey<Model>.Default, Model: PersistentModel {
         let descriptor = FetchDescriptor(predicate: predicate, sortBy: sortBy)
-        return FetchFirstKey(fetchDescriptor: descriptor)
+        return Self[FetchFirstKey(fetchDescriptor: descriptor), default: nil]
     }
 
     static func fetchAll<Model>(
@@ -87,16 +92,16 @@ public extension SharedReaderKey {
 
     static func fetchedResults<Model>(
         _ fetchDescriptor: FetchDescriptor<Model>
-    ) -> Self where Self == FetchedResultsKey<Model>, Model: PersistentModel {
-        FetchedResultsKey(fetchDescriptor: fetchDescriptor)
+    ) -> Self where Self == FetchedResultsKey<Model>.Default, Model: PersistentModel {
+        Self[FetchedResultsKey(fetchDescriptor: fetchDescriptor), default: nil]
     }
 
     static func fetchedResults<Model>(
         predicate: Predicate<Model>? = nil,
         sortBy: [SortDescriptor<Model>] = []
-    ) -> Self where Self == FetchedResultsKey<Model>, Model: PersistentModel {
+    ) -> Self where Self == FetchedResultsKey<Model>.Default, Model: PersistentModel {
         let descriptor = FetchDescriptor(predicate: predicate, sortBy: sortBy)
-        return FetchedResultsKey(fetchDescriptor: descriptor)
+        return Self[FetchedResultsKey(fetchDescriptor: descriptor), default: nil]
     }
 }
 
@@ -128,7 +133,7 @@ public struct FetchFirstKey<Model: PersistentModel>: SharedReaderKey {
         Task { @MainActor in
             do {
                 let result = try modelContainer.mainContext.fetch(fetchDescriptor).first
-                trace { logger.trace("FetchFirstKey.result: \(String(describing: result?.persistentModelID))") }
+                trace { logger.trace("\(Self.self).result: \(String(describing: result?.persistentModelID))") }
                 continuation.resume(returning: result)
             } catch {
                 logger.error("\(error)")
@@ -151,9 +156,9 @@ public struct FetchFirstKey<Model: PersistentModel>: SharedReaderKey {
 
                 for try await _ in changeNotifications {
                     guard !Task.isCancelled else { break }
-                    debug { logger.debug("FetchFirst(\(id)).NSPersistentStoreRemoteChange")}
+                    debug { logger.debug("\(Self.self)(\(id)).NSPersistentStoreRemoteChange")}
                     let result = try modelContainer.mainContext.fetch(fetchDescriptor).first
-                    trace { logger.trace("FetchFirstKey\(id)).fetchedResults: \(String(describing: result?.persistentModelID))") }
+                    trace { logger.trace("\(Self.self)\(id)).fetchedResults: \(String(describing: result?.persistentModelID))") }
                     subscriber.yield(result)
                 }
             } catch {
@@ -193,7 +198,7 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
         Task { @MainActor in
             do {
                 let results = try modelContainer.mainContext.fetch(fetchDescriptor)
-                trace { logger.trace("FetchAllKey\(id)).result[id]: \(results.map { $0.persistentModelID })") }
+                trace { logger.trace("\(Self.self)\(id)).result[id]: \(results.map { $0.persistentModelID })") }
                 continuation.resume(returning: results)
             } catch {
                 logger.error("\(error)")
@@ -209,7 +214,7 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
         let task = Task { @MainActor in
             // Send initial results
             let initialResults = try modelContainer.mainContext.fetch(fetchDescriptor)
-            trace { logger.trace("FetchAllKey\(id)).initialResults: \(initialResults.map { $0.persistentModelID })") }
+            trace { logger.trace("\(Self.self)(\(id)).initialResults: \(initialResults.map { $0.persistentModelID })") }
             subscriber.yield(initialResults)
 
             // Listen for changes
@@ -217,9 +222,9 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
 
             for try await _ in changeNotifications {
                 guard !Task.isCancelled else { break }
-                debug { logger.debug("FetchAllKey\(id)).NSPersistentStoreRemoteChange")}
+                debug { logger.debug("\(Self.self)(\(id)).NSPersistentStoreRemoteChange")}
                 let results = try modelContainer.mainContext.fetch(fetchDescriptor)
-                trace { logger.trace("FetchAllKey\(id)).fetchedResults[id]: \(results.map { $0.persistentModelID })") }
+                trace { logger.trace("\(Self.self)(\(id)).fetchedResults[id]: \(results.map { $0.persistentModelID })") }
                 subscriber.yield(results)
             }
         }
@@ -230,6 +235,7 @@ public struct FetchAllKey<Model: PersistentModel>: SharedReaderKey {
     }
 }
 
+// Uncomment this to see what's going on
 extension FetchResultsCollection: @retroactive @unchecked Sendable {}
 
 public struct FetchedResultsKey<Model: PersistentModel>: SharedReaderKey {
@@ -259,10 +265,13 @@ public struct FetchedResultsKey<Model: PersistentModel>: SharedReaderKey {
     ) {
         debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         Task { @MainActor in
-            let result = Result<FetchResult?, Error> {
-                try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
+            do {
+                let results = try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
+                trace { logger.trace("\(Self.self)(\(id)).result[id]: \(results.map { $0.persistentModelID })") }
+                continuation.resume(returning: results)
+            } catch {
+                logger.error("\(error)")
             }
-            continuation.resume(with: result)
         }
     }
 
@@ -273,14 +282,18 @@ public struct FetchedResultsKey<Model: PersistentModel>: SharedReaderKey {
         debug { logger.debug("\(Self.self)(\(id)).\(#function)") }
         let task = Task { @MainActor in
             // Send initial results
-            subscriber.yield(try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize))
+            let initialResults = try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
+            trace { logger.trace("\(Self.self)(\(id)).initialResults: \(initialResults.map { $0.persistentModelID })") }
+            subscriber.yield(initialResults)
 
             // Listen for changes
             let changeNotifications = NotificationCenter.default.notifications(named: .NSPersistentStoreRemoteChange)
 
             for try await _ in changeNotifications {
                 guard !Task.isCancelled else { break }
+                debug { logger.debug("\(Self.self)(\(id)).NSPersistentStoreRemoteChange")}
                 let results = try modelContainer.mainContext.fetch(fetchDescriptor, batchSize: batchSize)
+                trace { logger.trace("\(Self.self)(\(id)).fetchedResults[id]: \(results.map { $0.persistentModelID })") }
                 subscriber.yield(results)
             }
         }
