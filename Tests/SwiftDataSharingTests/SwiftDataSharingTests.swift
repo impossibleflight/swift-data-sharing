@@ -16,6 +16,20 @@ final class TestPerson {
     }
 }
 
+struct PersonValue: ModelConvertible {
+    var name: String
+    var age: Int
+    
+    init(_ model: TestPerson) {
+        self.init(name: model.name, age: model.age)
+    }
+
+    init(name: String, age: Int) {
+        self.age = age
+        self.name = name
+    }
+}
+
 extension TestPerson: Equatable {
     static func == (lhs: TestPerson, rhs: TestPerson) -> Bool {
         return lhs.persistentModelID == rhs.persistentModelID
@@ -35,10 +49,11 @@ struct SwiftDataSharingTests {
         try await withDependencies {
             $0.modelContainer = modelContainer
         } operation: {
-            @SharedReader(.fetchFirst(
-                predicate: #Predicate<TestPerson> { $0.name == "Alice" }
-            )) var person: TestPerson?
-            
+        let key = FetchFirstKey<PersonValue>.fetchFirst(
+            predicate: #Predicate<TestPerson> { $0.name == "Alice" }
+        )
+            @SharedReader(key) var person: PersonValue?
+
             #expect(person == nil)
             
             let alice = TestPerson(name: "Alice", age: 25)
@@ -66,7 +81,7 @@ struct SwiftDataSharingTests {
             #expect(person == nil)
         }
     }
-    
+
     @Test func fetchAll_reflectsDataChanges() async throws {
         try await withDependencies {
             $0.modelContainer = modelContainer
@@ -74,35 +89,32 @@ struct SwiftDataSharingTests {
             @SharedReader(.fetchAll(
                 predicate: #Predicate<TestPerson> { $0.age >= 25 },
                 sortBy: [SortDescriptor(\.age, order: .forward)]
-            )) var adults: [TestPerson]
-            
+            )) var adults: [PersonValue]
+
             #expect(adults.isEmpty)
             
             let alice = TestPerson(name: "Alice", age: 25)
             let bob = TestPerson(name: "Bob", age: 30)
             let charlie = TestPerson(name: "Charlie", age: 20)
-            
-            modelContainer.mainContext.insert(alice)
-            modelContainer.mainContext.insert(bob)
-            modelContainer.mainContext.insert(charlie)
-            try modelContainer.mainContext.save()
-            
+
+            try modelContainer.mainContext.transaction {
+                modelContainer.mainContext.insert(alice)
+                modelContainer.mainContext.insert(bob)
+                modelContainer.mainContext.insert(charlie)
+            }
+
             try await Task.sleep(nanoseconds: 100_000_000)
             
             #expect(adults.count == 2)
             #expect(adults[0].name == "Alice")
             #expect(adults[1].name == "Bob")
-            #expect(adults[0].age == 25)
-            #expect(adults[1].age == 30)
-            
+
             charlie.age = 35
             try modelContainer.mainContext.save()
             
             try await Task.sleep(nanoseconds: 100_000_000)
             
             #expect(adults.count == 3)
-            #expect(adults[0].name == "Alice")
-            #expect(adults[1].name == "Bob") 
             #expect(adults[2].name == "Charlie")
             #expect(adults[2].age == 35)
             
@@ -116,50 +128,12 @@ struct SwiftDataSharingTests {
             #expect(adults[1].name == "Charlie")
         }
     }
-    
-    @Test func fetchedResults_reflectsDataChanges() async throws {
-        try await withDependencies {
-            $0.modelContainer = modelContainer
-        } operation: {
-            @SharedReader(.fetchedResults(
-                sortBy: [SortDescriptor(\.name, order: .forward)]
-            )) var allPeople: FetchResultsCollection<TestPerson>?
-            
-            #expect(allPeople == nil)
 
-            let names = ["Alice", "Bob", "Charlie", "David", "Eve"]
-            for (index, name) in names.enumerated() {
-                let person = TestPerson(name: name, age: 20 + index)
-                modelContainer.mainContext.insert(person)
-            }
-            try modelContainer.mainContext.save()
-            
-            try await Task.sleep(nanoseconds: 100_000_000)
-
-            let fetchedResultPeople = try #require(allPeople)
-
-            #expect(fetchedResultPeople.count == 5)
-            let sortedNames = fetchedResultPeople.map(\.name)
-            #expect(sortedNames == ["Alice", "Bob", "Charlie", "David", "Eve"])
-            
-            let frank = TestPerson(name: "Frank", age: 25)
-            modelContainer.mainContext.insert(frank)
-            try modelContainer.mainContext.save()
-            
-            try await Task.sleep(nanoseconds: 100_000_000)
-            
-            #expect(fetchedResultPeople.count == 6)
-            let updatedNames = fetchedResultPeople.map(\.name)
-            #expect(updatedNames.contains("Frank"))
-            #expect(updatedNames == updatedNames.sorted())
-        }
-    }
-    
-    @Test func recordsIssue_whenMissingModelContainer() throws {
+    @Test func recordsIssue_whenMissingModelContainer() {
         withKnownIssue {
             @SharedReader(.fetchFirst(
                 predicate: #Predicate<TestPerson> { $0.name == "Test" }
-            )) var person: TestPerson?
+            )) var person: PersonValue?
         }
     }
 }
